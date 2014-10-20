@@ -74,37 +74,87 @@ namespace Microsoft.Framework.PackageManager.Packing
 
             WriteGlobalJson();
 
+            // Generate .cmd files
+            GenerateBatchFiles();
+
+            // Generate .sh files
+            GenerateBashScripts();
+        }
+
+        private void GenerateBatchFiles()
+        {
             string relativeAppBase;
             if (NoSource)
             {
-                relativeAppBase = Path.Combine(AppRootName, "packages", _project.Name,
+                relativeAppBase = string.Format(@"{0}\{1}\{2}\{3}\{4}",
+                    AppRootName,
+                    "packages",
+                    _project.Name,
+                    _project.Version,
+                    "root");
+            }
+            else
+            {
+                relativeAppBase = string.Format(@"{0}\{1}\{2}", AppRootName, "src", _project.Name);
+            }
+
+            const string template = @"
+@""{0}klr.exe"" --appbase ""%~dp0{1}"" Microsoft.Framework.ApplicationHost {2} %*
+";
+
+            foreach (var commandName in _project.Commands.Keys)
+            {
+                var klrFolder = string.Empty;
+                if (Runtimes.Any())
+                {
+                    klrFolder = string.Format(@"%~dp0{0}\packages\{1}\bin\", AppRootName, Runtimes.First().Name);
+                }
+
+                File.WriteAllText(
+                    Path.Combine(OutputPath, commandName + ".cmd"),
+                    string.Format(template, klrFolder, relativeAppBase, commandName));
+            }
+        }
+
+        private void GenerateBashScripts()
+        {
+            string relativeAppBase;
+            if (NoSource)
+            {
+                relativeAppBase = string.Format("{0}/{1}/{2}/{3}/{4}", AppRootName, "packages", _project.Name,
                     _project.Version.ToString(), "root");
             }
             else
             {
-                relativeAppBase = Path.Combine(AppRootName, "src", _project.Name);
+                relativeAppBase = string.Format("{0}/{1}/{2}", AppRootName, "src", _project.Name);
             }
+
+            const string template = @"#!/bin/bash
+
+SOURCE=""${{BASH_SOURCE[0]}}""
+while [ -h ""$SOURCE"" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR=""$( cd -P ""$( dirname ""$SOURCE"" )"" && pwd )""
+  SOURCE=""$(readlink ""$SOURCE"")""
+  [[ $SOURCE != /* ]] && SOURCE=""$DIR/$SOURCE"" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+DIR=""$( cd -P ""$( dirname ""$SOURCE"" )"" && pwd )""
+
+export SET KRE_APPBASE=""$DIR/{0}""
+
+""{1}klr"" Microsoft.Framework.ApplicationHost {2} ""$@""";
 
             foreach (var commandName in _project.Commands.Keys)
             {
-                const string template1 = @"
-@""%~dp0{3}\packages\{2}\bin\klr.exe"" --appbase ""%~dp0{1}"" Microsoft.Framework.ApplicationHost {0} %*
-";
-                const string template2 = @"
-@klr.exe --appbase ""%~dp0{1}"" Microsoft.Framework.ApplicationHost {0} %*
-";
+                var klrFolder = string.Empty;
                 if (Runtimes.Any())
                 {
-                    File.WriteAllText(
-                        Path.Combine(OutputPath, commandName + ".cmd"),
-                        string.Format(template1, commandName, relativeAppBase, Runtimes.First().Name, AppRootName));
+                    klrFolder = string.Format(@"$DIR/{0}/packages/{1}/bin/",
+                        AppRootName, Runtimes.First().Name);
                 }
-                else
-                {
-                    File.WriteAllText(
-                        Path.Combine(OutputPath, commandName + ".cmd"),
-                        string.Format(template2, commandName, relativeAppBase));
-                }
+
+                File.WriteAllText(
+                    Path.Combine(OutputPath, commandName + ".sh"),
+                    string.Format(template, relativeAppBase, klrFolder, commandName).Replace("\r\n", "\n"));
             }
         }
 
