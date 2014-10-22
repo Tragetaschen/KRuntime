@@ -1,5 +1,5 @@
 @Echo OFF
-SETLOCAL
+SETLOCAL ENABLEDELAYEDEXPANSION
 SET ERRORLEVEL=
 :: K [command] [args]
 ::   command :  Required - Name of the command to execute
@@ -12,10 +12,25 @@ REM <dev>
 @Echo ON
 REM </dev>
 
-IF EXIST "%~dp0k-%1.cmd" (
-  "%~dp0k-%1.cmd" %2 %3 %4 %5 %6 %7 %8 %9 
+SET KRE_BIN=%~dp0
+
+SET I=1
+:LOOP
+IF (%1)==() (
+  GOTO END
 ) ELSE (
-  CALL "%~dp0KLR.cmd" "Microsoft.Framework.ApplicationHost" %*
+  SET ARG=%1
+  SET ARGS[!I!]=!ARG:/?="/?"!
+  SET /A I+=1
+  SHIFT
+  GOTO LOOP
+)
+:END
+
+IF EXIST "%KRE_BIN%k-!ARGS[1]!.cmd" (
+  "%KRE_BIN%k-!ARGS[1]!.cmd" !ARGS[2]! !ARGS[3]! !ARGS[4]! !ARGS[5]! !ARGS[6]! !ARGS[7]! !ARGS[8]! !ARGS[9]! 
+) ELSE (
+  CALL "%KRE_BIN%KLR.cmd" "Microsoft.Framework.ApplicationHost" !ARGS[1]! !ARGS[2]! !ARGS[3]! !ARGS[4]! !ARGS[5]! !ARGS[6]! !ARGS[7]! !ARGS[8]! !ARGS[9]!
 )
 
 exit /b %ERRORLEVEL%
