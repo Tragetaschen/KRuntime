@@ -14,6 +14,24 @@ namespace Microsoft.Framework.PackageManager
         private readonly string _projectName = "TestProject";
         private readonly string _outputDirName = "PackOutput";
 
+        private static readonly string BatchFileTemplate = @"
+@""{0}klr.exe"" --appbase ""%~dp0approot\src\{1}"" Microsoft.Framework.ApplicationHost {2} %*
+";
+
+        private static readonly string BashScriptTemplate = @"#!/bin/bash
+
+SOURCE=""${{BASH_SOURCE[0]}}""
+while [ -h ""$SOURCE"" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR=""$( cd -P ""$( dirname ""$SOURCE"" )"" && pwd )""
+  SOURCE=""$(readlink ""$SOURCE"")""
+  [[ $SOURCE != /* ]] && SOURCE=""$DIR/$SOURCE"" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+DIR=""$( cd -P ""$( dirname ""$SOURCE"" )"" && pwd )""
+
+export SET KRE_APPBASE=""$DIR/approot/src/{0}""
+
+""{1}klr"" Microsoft.Framework.ApplicationHost {2} ""$@""";
+
         public static IEnumerable<object[]> KreHomeDirs
         {
             get
@@ -460,7 +478,7 @@ namespace Microsoft.Framework.PackageManager
                     compareFileContents: true));
             }
         }
-        
+
         [Theory]
         [MemberData("KreHomeDirs")]
         public void CorrectlyExcludeFoldersStartingWithDots(DisposableDir kreHomeDir)
@@ -775,6 +793,177 @@ namespace Microsoft.Framework.PackageManager
     <add key=""kre-app-base"" value=""..\approot\src\PROJECT_NAME"" />
   </appSettings>
 </configuration>".Replace("PROJECT_NAME", testEnv.ProjectName));
+                Assert.True(expectedOutputDir.MatchDirectoryOnDisk(testEnv.PackOutputDirPath,
+                    compareFileContents: true));
+            }
+        }
+
+        [Theory]
+        [MemberData("KreHomeDirs")]
+        public void GenerateBatchFilesAndBashScriptsWithoutPackedRuntime(DisposableDir kreHomeDir)
+        {
+            var projectStructure = @"{
+  '.': ['project.json'],
+  'packages': {}
+}";
+            var expectedOutputStructure = @"{
+  '.': ['run.cmd', 'run.sh', 'kestrel.cmd', 'kestrel.sh'],
+  'approot': {
+    'global.json': '',
+    'src': {
+      'PROJECT_NAME': {
+        '.': ['project.json']
+      }
+    }
+  }
+}".Replace("PROJECT_NAME", _projectName);
+
+            using (var testEnv = new KpmTestEnvironment(kreHomeDir, _projectName, _outputDirName))
+            {
+                DirTree.CreateFromJson(projectStructure)
+                    .WithFileContents("project.json", @"{
+  ""commands"": {
+    ""run"": ""run server.urls=http://localhost:5003"",
+    ""kestrel"": ""Microsoft.AspNet.Hosting --server Kestrel --server.urls http://localhost:5004""
+  },
+  ""frameworks"": {
+    ""aspnet50"": { },
+    ""aspnetcore50"": { }
+  }
+}")
+                    .WriteTo(testEnv.ProjectPath);
+
+                var environment = new Dictionary<string, string>()
+                {
+                    { "KRE_PACKAGES", Path.Combine(testEnv.ProjectPath, "packages") }
+                };
+
+                var exitCode = KpmTestUtils.ExecKpm(
+                    kreHomeDir,
+                    subcommand: "pack",
+                    arguments: string.Format("--out {0}",
+                        testEnv.PackOutputDirPath),
+                    environment: environment,
+                    workingDir: testEnv.ProjectPath);
+                Assert.Equal(0, exitCode);
+
+                var expectedOutputDir = DirTree.CreateFromJson(expectedOutputStructure)
+                    .WithFileContents(Path.Combine("approot", "src", testEnv.ProjectName, "project.json"), @"{
+  ""commands"": {
+    ""run"": ""run server.urls=http://localhost:5003"",
+    ""kestrel"": ""Microsoft.AspNet.Hosting --server Kestrel --server.urls http://localhost:5004""
+  },
+  ""frameworks"": {
+    ""aspnet50"": { },
+    ""aspnetcore50"": { }
+  }
+}")
+                    .WithFileContents(Path.Combine("approot", "global.json"), @"{
+  ""dependencies"": {},
+  ""packages"": ""packages""
+}")
+                    .WithFileContents("run.cmd", string.Format(BatchFileTemplate, string.Empty, testEnv.ProjectName, "run"))
+                    .WithFileContents("kestrel.cmd", string.Format(BatchFileTemplate, string.Empty, testEnv.ProjectName, "kestrel"))
+                    .WithFileContents("run.sh",
+                        string.Format(BashScriptTemplate, testEnv.ProjectName, string.Empty, "run").Replace("\r\n", "\n"))
+                    .WithFileContents("kestrel.sh",
+                        string.Format(BashScriptTemplate, testEnv.ProjectName, string.Empty, "kestrel").Replace("\r\n", "\n"));
+
+                Assert.True(expectedOutputDir.MatchDirectoryOnDisk(testEnv.PackOutputDirPath,
+                    compareFileContents: true));
+            }
+        }
+
+        [Theory]
+        [MemberData("KreHomeDirs")]
+        public void GenerateBatchFilesAndBashScriptsWithPackedRuntime(DisposableDir kreHomeDir)
+        {
+            var kreRoot = Directory.EnumerateDirectories(Path.Combine(kreHomeDir, "packages"), "KRE-*").First();
+            var kreName = new DirectoryInfo(kreRoot).Name;
+
+            var projectStructure = @"{
+  '.': ['project.json'],
+  'packages': {}
+}";
+            var expectedOutputStructure = @"{
+  '.': ['run.cmd', 'run.sh', 'kestrel.cmd', 'kestrel.sh'],
+  'approot': {
+    'global.json': '',
+    'src': {
+      'PROJECT_NAME': {
+        '.': ['project.json']
+      }
+    },
+    'packages': {
+      'KRE_PACKAGE_NAME': {}
+    }
+  }
+}".Replace("PROJECT_NAME", _projectName).Replace("KRE_PACKAGE_NAME", kreName);
+
+            using (var testEnv = new KpmTestEnvironment(kreHomeDir, _projectName, _outputDirName))
+            {
+                DirTree.CreateFromJson(projectStructure)
+                    .WithFileContents("project.json", @"{
+  ""commands"": {
+    ""run"": ""run server.urls=http://localhost:5003"",
+    ""kestrel"": ""Microsoft.AspNet.Hosting --server Kestrel --server.urls http://localhost:5004""
+  },
+  ""frameworks"": {
+    ""aspnet50"": { },
+    ""aspnetcore50"": { }
+  }
+}")
+                    .WriteTo(testEnv.ProjectPath);
+
+                var environment = new Dictionary<string, string>()
+                {
+                    { "KRE_PACKAGES", Path.Combine(testEnv.ProjectPath, "packages") },
+                    { "KRE_HOME", kreHomeDir },
+                    { "KRE_TRACE", "1" }
+                };
+
+                var exitCode = KpmTestUtils.ExecKpm(
+                    kreHomeDir,
+                    subcommand: "pack",
+                    arguments: string.Format("--out {0} --runtime {1}",
+                        testEnv.PackOutputDirPath, kreName),
+                    environment: environment,
+                    workingDir: testEnv.ProjectPath);
+                Assert.Equal(0, exitCode);
+
+                var kreNupkgSHA = TestUtils.ComputeSHA(Path.Combine(kreRoot, kreName + ".nupkg"));
+                var runtimeSubDir = DirTree.CreateFromDirectory(kreRoot)
+                    .WithFileContents(kreName + ".nupkg.sha512", kreNupkgSHA)
+                    .RemoveFile("[Content_Types].xml")
+                    .RemoveFile(Path.Combine("_rels", ".rels"))
+                    .RemoveSubDir("package");
+
+                var batchFileBinPath = string.Format(@"%~dp0approot\packages\{0}\bin\", kreName);
+                var bashScriptBinPath = string.Format("$DIR/approot/packages/{0}/bin/", kreName);
+
+                var expectedOutputDir = DirTree.CreateFromJson(expectedOutputStructure)
+                    .WithFileContents(Path.Combine("approot", "src", testEnv.ProjectName, "project.json"), @"{
+  ""commands"": {
+    ""run"": ""run server.urls=http://localhost:5003"",
+    ""kestrel"": ""Microsoft.AspNet.Hosting --server Kestrel --server.urls http://localhost:5004""
+  },
+  ""frameworks"": {
+    ""aspnet50"": { },
+    ""aspnetcore50"": { }
+  }
+}")
+                    .WithFileContents(Path.Combine("approot", "global.json"), @"{
+  ""dependencies"": {},
+  ""packages"": ""packages""
+}")
+                    .WithFileContents("run.cmd", string.Format(BatchFileTemplate, batchFileBinPath, testEnv.ProjectName, "run"))
+                    .WithFileContents("kestrel.cmd", string.Format(BatchFileTemplate, batchFileBinPath, testEnv.ProjectName, "kestrel"))
+                    .WithFileContents("run.sh",
+                        string.Format(BashScriptTemplate, testEnv.ProjectName, bashScriptBinPath, "run").Replace("\r\n", "\n"))
+                    .WithFileContents("kestrel.sh",
+                        string.Format(BashScriptTemplate, testEnv.ProjectName, bashScriptBinPath, "kestrel").Replace("\r\n", "\n"))
+                    .WithSubDir(Path.Combine("approot", "packages", kreName), runtimeSubDir);
+
                 Assert.True(expectedOutputDir.MatchDirectoryOnDisk(testEnv.PackOutputDirPath,
                     compareFileContents: true));
             }
