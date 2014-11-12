@@ -3,9 +3,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Runtime.Versioning;
 using Microsoft.Framework.Runtime;
 using Newtonsoft.Json.Linq;
 using NuGet;
@@ -152,10 +152,28 @@ export SET KRE_APPBASE=""$DIR/{0}""
                         AppRootName, Runtimes.First().Name);
                 }
 
-                File.WriteAllText(
-                    Path.Combine(OutputPath, commandName + ".sh"),
+                var scriptPath = Path.Combine(OutputPath, commandName + ".sh");
+                File.WriteAllText(scriptPath,
                     string.Format(template, relativeAppBase, klrFolder, commandName).Replace("\r\n", "\n"));
+                if (PlatformHelper.IsMono)
+                {
+                    MarkExecutable(scriptPath);
+                }
             }
+        }
+
+        private static void MarkExecutable(string scriptPath)
+        {
+            var processStartInfo = new ProcessStartInfo()
+            {
+                UseShellExecute = false,
+                FileName = "chmod",
+                Arguments = "+x " + scriptPath
+            };
+
+            var process = Process.Start(processStartInfo);
+            process.WaitForExit();
+            // We don't check exit code. Ignore failure of chmod operation.
         }
 
         private void WriteGlobalJson()
