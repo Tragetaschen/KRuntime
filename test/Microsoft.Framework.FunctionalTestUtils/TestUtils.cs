@@ -6,18 +6,14 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using Microsoft.Framework.Runtime;
 
 namespace Microsoft.Framework.FunctionalTestUtils
 {
     public static class TestUtils
     {
-        public static DirTree CreateDirTree(string json)
-        {
-            return new DirTree(json);
-        }
-
-        public static DisposableDirPath CreateTempDir()
+        public static DisposableDir CreateTempDir()
         {
             var tempDirPath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             Directory.CreateDirectory(tempDirPath);
@@ -64,7 +60,7 @@ namespace Microsoft.Framework.FunctionalTestUtils
             return Path.Combine(kRuntimeRoot, "artifacts", "build");
         }
 
-        public static IEnumerable<DisposableDirPath> GetUnpackedKrePaths()
+        public static IEnumerable<DisposableDir> GetKreHomePaths()
         {
             var buildArtifactDir = GetBuildArtifactsFolder();
             var kreNupkgs = new List<string>();
@@ -76,7 +72,9 @@ namespace Microsoft.Framework.FunctionalTestUtils
             {
                 var kreName = Path.GetFileNameWithoutExtension(nupkg);
                 var krePath = CreateTempDir();
-                System.IO.Compression.ZipFile.ExtractToDirectory(nupkg, krePath);
+                var kreRoot = Path.Combine(krePath, "packages", kreName);
+                System.IO.Compression.ZipFile.ExtractToDirectory(nupkg, kreRoot);
+                File.Copy(nupkg, Path.Combine(kreRoot, kreName + ".nupkg"));
                 yield return krePath;
             }
         }
@@ -108,5 +106,15 @@ namespace Microsoft.Framework.FunctionalTestUtils
             var segments = kreName.Split(new[] { '.' }, 2);
             return segments[1];
         }
+
+        public static string ComputeSHA(string path)
+        {
+            using (var sourceStream = File.OpenRead(path))
+            {
+                var sha512Bytes = SHA512.Create().ComputeHash(sourceStream);
+                return Convert.ToBase64String(sha512Bytes);
+            }
+        }
+
     }
 }
