@@ -118,6 +118,18 @@ namespace Microsoft.Framework.PackageManager.Restore.NuGet
 
             var response = await _client.SendAsync(request);
 
+            var statusCode = response.StatusCode;
+            if (statusCode != HttpStatusCode.OK)
+            {
+#if ASPNETCORE50
+                throw new Exception(
+#else
+                throw new WebException(
+#endif
+                    string.Format("The remote server returned an error: ({0}) {1}",
+                        (int)statusCode, statusCode.ToString()));
+            }
+
             var newFile = result.CacheFileName + "-new";
 
             // Zero value of TTL means we always download the latest package
