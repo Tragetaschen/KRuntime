@@ -81,7 +81,7 @@ namespace Microsoft.Framework.PackageManager
 
         private Func<string, string> GetScriptVariable(Runtime.Project project, Func<string, string> getVariable)
         {
-            var keys = new Dictionary<string, Func<string>>(StringComparer.OrdinalIgnoreCase)
+            var wellKnownVariables = new Dictionary<string, Func<string>>(StringComparer.OrdinalIgnoreCase)
             {
                 { "project:Directory", () => project.ProjectDirectory },
                 { "project:Name", () => project.Name },
@@ -92,7 +92,7 @@ namespace Microsoft.Framework.PackageManager
             {
                 // try returning key from dictionary
                 Func<string> valueFactory;
-                if (keys.TryGetValue(key, out valueFactory))
+                if (wellKnownVariables.TryGetValue(key, out valueFactory))
                 {
                     return valueFactory();
                 }

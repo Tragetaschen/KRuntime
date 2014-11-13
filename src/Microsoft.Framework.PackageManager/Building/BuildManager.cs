@@ -18,6 +18,7 @@ namespace Microsoft.Framework.PackageManager
         private readonly IAssemblyLoaderContainer _loaderContainer;
         private readonly IApplicationEnvironment _applicationEnvironment;
         private readonly BuildOptions _buildOptions;
+        private readonly Func<string, string> _getScriptVariables;
 
         public BuildManager(IServiceProvider hostServices, BuildOptions buildOptions)
         {
@@ -27,6 +28,16 @@ namespace Microsoft.Framework.PackageManager
 
             _applicationEnvironment = (IApplicationEnvironment)hostServices.GetService(typeof(IApplicationEnvironment));
             _loaderContainer = (IAssemblyLoaderContainer)hostServices.GetService(typeof(IAssemblyLoaderContainer));
+
+            _getScriptVariables = key =>
+            {
+                if (StringComparer.OrdinalIgnoreCase.Compare("project:BuildOutputDir", key) == 0)
+                {
+                    return GetBuildOutputDir(_buildOptions);
+                }
+
+                return null;
+            };
 
             ScriptExecutor = new ScriptExecutor();
         }
@@ -44,7 +55,7 @@ namespace Microsoft.Framework.PackageManager
 
             var sw = Stopwatch.StartNew();
 
-            var baseOutputPath = _buildOptions.OutputDir ?? Path.Combine(_buildOptions.ProjectDir, "bin");
+            var baseOutputPath = GetBuildOutputDir(_buildOptions);
             var configurations = _buildOptions.Configurations.DefaultIfEmpty("Debug");
 
             var specifiedFrameworks = _buildOptions.TargetFrameworks
@@ -72,12 +83,7 @@ namespace Microsoft.Framework.PackageManager
                 frameworks = new[] { _applicationEnvironment.RuntimeFramework };
             }
 
-            Func<string, string> getVariable = key =>
-            {
-                return null;
-            };
-
-            ScriptExecutor.Execute(project, "prebuild", getVariable);
+            ScriptExecutor.Execute(project, "prebuild", _getScriptVariables);
 
             var success = true;
 
@@ -196,7 +202,7 @@ namespace Microsoft.Framework.PackageManager
                 }
             }
 
-            ScriptExecutor.Execute(project, "postbuild", getVariable);
+            ScriptExecutor.Execute(project, "postbuild", _getScriptVariables);
 
             sw.Stop();
 
@@ -309,6 +315,11 @@ namespace Microsoft.Framework.PackageManager
         {
             string fileName = project.Name + "." + project.Version + (symbols ? ".symbols" : "") + ".nupkg";
             return Path.Combine(outputPath, fileName);
+        }
+
+        private static string GetBuildOutputDir(BuildOptions buildOptions)
+        {
+            return buildOptions.OutputDir ?? Path.Combine(buildOptions.ProjectDir, "bin");
         }
     }
 }
